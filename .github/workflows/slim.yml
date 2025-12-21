@@ -1,0 +1,20 @@
+# .github/workflows/slim.yml
+name: Docker Slim
+on: [push]
+jobs:
+  slim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build original
+        run: docker build -t wechat-selkies:latest .
+      - name: Slim it
+        run: |
+          docker run --privileged --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            slimtoolkit/slim build --tag wechat-selkies:minimal wechat-selkies:latest
+      - name: Save image
+        run: docker save wechat-selkies:minimal | gzip > wechat-selkies-minimal.tar.gz
+      - uses: actions/upload-artifact@v3
+        with:
+          name: minimized-image
+          path: wechat-selkies-minimal.tar.gz
