@@ -1,5 +1,5 @@
 # WeChat for Linux using Selkies baseimage
-FROM ghcr.io/linuxserver/baseimage-selkies:ubuntunoble
+FROM ghcr.io/linuxserver/baseimage-selkies:ubuntunoble as builder
 
 # Metadata labels
 LABEL org.opencontainers.image.title="WeChat Selkies"
@@ -15,84 +15,69 @@ ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 RUN echo "🏗️ Building WeChat-Selkies on $BUILDPLATFORM, targeting $TARGETPLATFORM"
 
-# set environment variables
+# Download WeChat in builder stage (minimal layer)
 RUN apt-get update && \
-    apt-get install -y fonts-noto-cjk libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
-    libxcb-render-util0 libxcb-xkb1 libxkbcommon-x11-0 \
-    shared-mime-info desktop-file-utils libxcb1 libxcb-icccm4 libxcb-image0 \
-    libxcb-keysyms1 libxcb-randr0 libxcb-render0 libxcb-render-util0 libxcb-shape0 \
-    libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xkb1 libxcb-xinerama0 \
-    libxcb-xkb1 libxcb-glx0 libatk1.0-0 libatk-bridge2.0-0 libc6 libcairo2 libcups2 \
-    libdbus-1-3 libfontconfig1 libgbm1 libgcc1 libgdk-pixbuf2.0-0 libglib2.0-0 \
-    libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 \
-    libxcomposite1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
-    libxss1 libxtst6 libatomic1 libxcomposite1 libxrender1 libxrandr2 libxkbcommon-x11-0 \
-    libfontconfig1 libdbus-1-3 libnss3 libx11-xcb1 python3-tk stalonetray
-
-RUN pip install --no-cache-dir python-xlib
-
-# Install WeChat based on target architecture
-RUN case "$TARGETPLATFORM" in \
-    "linux/amd64") \
-        WECHAT_URL="https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb"; \
-        WECHAT_ARCH="x86_64" ;; \
-    "linux/arm64") \
-        WECHAT_URL="https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_arm64.deb"; \
-        WECHAT_ARCH="arm64" ;; \
-    *) \
-        echo "❌ Unsupported platform: $TARGETPLATFORM" >&2; \
-        echo "Supported platforms: linux/amd64, linux/arm64" >&2; \
-        exit 1 ;; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates && \
+    case "$TARGETPLATFORM" in \
+        "linux/amd64") \
+            WECHAT_URL="https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb" ;; \
+        "linux/arm64") \
+            WECHAT_URL="https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_arm64.deb" ;; \
+        *) echo "Unsupported platform"; exit 1 ;; \
     esac && \
-    echo "📦 Downloading WeChat for $WECHAT_ARCH architecture..." && \
-    curl -fsSL -o wechat.deb "$WECHAT_URL" && \
-    echo "🔧 Installing WeChat..." && \
-    (dpkg -i wechat.deb || (apt-get update && apt-get install -f -y && dpkg -i wechat.deb)) && \
-    rm -f wechat.deb && \
-    echo "✅ WeChat installation completed for $WECHAT_ARCH"
+    curl -fsSL -o /tmp/wechat.deb "$WECHAT_URL" && \
+    apt-get purge -y --autoremove curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* /var/tmp/*
 
-# Install QQ based on target architecture
-RUN case "$TARGETPLATFORM" in \
-    "linux/amd64") \
-        QQ_URL="https://dldir1v6.qq.com/qqfile/qq/QQNT/Linux/QQ_3.2.22_251203_amd64_01.deb"; \
-        QQ_ARCH="x86_64" ;; \
-    "linux/arm64") \
-        QQ_URL="https://dldir1v6.qq.com/qqfile/qq/QQNT/Linux/QQ_3.2.22_251203_arm64_01.deb"; \
-        QQ_ARCH="arm64" ;; \
-    *) \
-        echo "❌ Unsupported platform: $TARGETPLATFORM" >&2; \
-        echo "Supported platforms: linux/amd64, linux/arm64" >&2; \
-        exit 1 ;; \
-    esac && \
-    echo "📦 Downloading QQ for $QQ_ARCH architecture..." && \
-    curl -fsSL -o qq.deb "$QQ_URL" && \
-    echo "🔧 Installing QQ..." && \
-    (dpkg -i qq.deb || (apt-get update && apt-get install -f -y && dpkg -i qq.deb)) && \
-    rm -f qq.deb && \
-    echo "✅ QQ installation completed for $QQ_ARCH"
+# Final stage - ultra-minimal
+FROM ghcr.io/linuxserver/baseimage-selkies:ubuntunoble
 
-# Clean up
-RUN apt-get purge -y --autoremove
-RUN apt-get autoclean && \
-    rm -rf \
-        /config/.cache \
-        /config/.npm \
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+RUN echo "🏗️ Building WeChat-Selkies on $BUILDPLATFORM, targeting $TARGETPLATFORM"
+
+# Copy WeChat from builder
+COPY --from=builder /tmp/wechat.deb /tmp/wechat.deb
+
+# Install ONLY essential runtime dependencies + WeChat in ONE layer (UNCHANGED)
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+        libxkbcommon-x11-0 libxcb1 libxcb-randr0 libxcb-render0 libxcb-shape0 \
+        libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xinerama0 \
+        libatk1.0-0 libatk-bridge2.0-0 libc6 libcairo2 libdbus-1-3 \
+        libfontconfig1 libgbm1 libgcc1 libgdk-pixbuf2.0-0 libglib2.0-0 \
+        libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
+        libstdc++6 libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+        libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libatomic1 \
+        libx11-xcb1 stalonetray python3-xlib && \
+    dpkg -i /tmp/wechat.deb || apt-get install -f -y && \
+    apt-get purge -y --autoremove && \
+    apt-get autoclean && \
+    rm -rf /tmp/wechat.deb \
+        /root/.cache /root/.pip /root/.local \
+        /config/.cache /config/.npm \
         /var/lib/apt/lists/* \
-        /var/tmp/* \
-        /tmp/*
-
-# configure openbox dock mode for stalonetray
-RUN sed -i '/<dock>/,/<\/dock>/s/<noStrut>no<\/noStrut>/<noStrut>yes<\/noStrut>/' /etc/xdg/openbox/rc.xml
+        /var/tmp/* /tmp/* \
+        /var/log/* \
+        /usr/share/doc/* /usr/share/man/* \
+        /usr/share/locale/* !/usr/share/locale/zh_CN* \
+        /usr/share/glib-2.0/schemas/*.xml \
+        /usr/share/gtk-doc 2>/dev/null || true \
+        /usr/lib/python3*/test* /usr/lib/python3*/idlelib* /usr/lib/python3*/ensurepip* \
+        /usr/lib/python3.*/dist-packages/*test* && \
+    find /usr -name "*.pyc" -delete 2>/dev/null || true && \
+    find /usr -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -name "*.a" -delete 2>/dev/null || true && \
+    sed -i '/<dock>/,/<\/dock>/s/<noStrut>no<\/noStrut>/<noStrut>yes<\/noStrut>/' /etc/xdg/openbox/rc.xml && \
+    cp /usr/share/icons/hicolor/128x128/apps/wechat.png /usr/share/selkies/www/icon.png && \
+    mkdir -p /var/log/nginx && chmod 755 /var/log/nginx
 
 # set app name
 ENV TITLE="WeChat-Selkies"
 ENV TZ="Asia/Shanghai"
 ENV LC_ALL="zh_CN.UTF-8"
 ENV AUTO_START_WECHAT="true"
-ENV AUTO_START_QQ="false"
-
-# update favicon
-RUN cp /usr/share/icons/hicolor/128x128/apps/wechat.png /usr/share/selkies/www/icon.png
 
 # add local files
 COPY /root /
