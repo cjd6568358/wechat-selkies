@@ -1,0 +1,319 @@
+请结合两份dockerfile优化精简生成一份最终版dockerfile,第二份引用的基础镜像就是第一份的产出。用于在Selkies WebRTC环境中运行wechat。目标：
+
+1.Docker依赖移除：
+删除docker-ce、containerd.io、dind等所有Docker相关包
+移除usermod -aG docker abc（微信不需要容器管理）
+2.
+空间优化：
+所有apt操作合并到单层（减少镜像层数）
+清理策略增强：删除测试文件、文档、本地化文件（保留zh_CN）
+构建工具（gcc/make）在安装后立即卸载
+3.和原有保持100%兼容性，不确定的依赖不要轻易删除，不确定的步骤不要省略
+4.不要修改舍弃COPY命令
+
+1.
+`# syntax=docker/dockerfile:1
+FROM lscr.io/linuxserver/xvfb:arm64v8-ubuntunoble AS xvfb
+
+# Runtime stage
+FROM ghcr.io/linuxserver/baseimage-ubuntu:arm64v8-noble
+
+# set version label
+
+LABEL build_version="Linuxserver.io version"
+LABEL maintainer="thelamer"
+
+# env
+ENV DISPLAY=:1 \
+    PERL5LIB=/usr/local/bin \
+    HOME=/config \
+    START_DOCKER=true \
+    PULSE_RUNTIME_PATH=/defaults \
+    SELKIES_INTERPOSER=/usr/lib/selkies_joystick_interposer.so \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    DISABLE_ZINK=false \
+    DISABLE_DRI3=false \
+    TITLE=Selkies
+
+COPY /assets/selkies.tar.gz /tmp/selkies.tar.gz
+COPY /assets/proot-apps-x86_64.tar.gz /tmp/proot-apps-x86_64.tar.gz
+COPY /assets/dind /usr/local/bin/dind
+COPY /assets/libva.deb /tmp/libva/libva.deb
+COPY /assets/theme.tar.gz /tmp/theme.tar.gz
+
+RUN \
+  echo "**** dev deps ****" && \
+  apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    python3-dev && \
+  echo "**** enable locales ****" && \
+  sed -i \
+    '/locale/d' \
+    /etc/dpkg/dpkg.cfg.d/excludes && \
+  echo "**** install deps ****" && \
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker.gpg && \
+  echo "deb [arch=arm64 signed-by=/usr/share/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list && \
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+  apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    breeze-cursor-theme \
+    ca-certificates \
+    cmake \
+    console-data \
+    containerd.io \
+    dbus-x11 \
+    docker-buildx-plugin \
+    docker-ce \
+    docker-ce-cli \
+    docker-compose-plugin \
+    dunst \
+    file \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fonts-noto-core \
+    foot \
+    fuse-overlayfs \
+    g++ \
+    gcc \
+    git \
+    kbd \
+    labwc \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libev4 \
+    libfontenc1 \
+    libfreetype6 \
+    libgbm1 \
+    libgcrypt20 \
+    libgirepository-1.0-1 \
+    libgl1-mesa-dri \
+    libglu1-mesa \
+    libgnutls30 \
+    libgtk-3.0 \
+    libjpeg-turbo8 \
+    libnginx-mod-http-fancyindex \
+    libnotify-bin \
+    libnss3 \
+    libnvidia-egl-wayland1 \
+    libopus0 \
+    libp11-kit0 \
+    libpam0g \
+    libtasn1-6 \
+    libvulkan1 \
+    libwayland-client0 \
+    libwayland-cursor0 \
+    libwayland-egl1 \
+    libwayland-server0 \
+    libx11-6 \
+    libx264-164 \
+    libxau6 \
+    libxcb1 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-render-util0 \
+    libxcursor1 \
+    libxdmcp6 \
+    libxext6 \
+    libxfconf-0-3 \
+    libxfixes3 \
+    libxfont2 \
+    libxinerama1 \
+    libxkbcommon-dev \
+    libxkbcommon-x11-0 \
+    libxshmfence1 \
+    libxtst6 \
+    locales-all \
+    make \
+    mesa-libgallium \
+    mesa-va-drivers \
+    mesa-vulkan-drivers \
+    nginx \
+    openbox \
+    openssh-client \
+    openssl \
+    pciutils \
+    procps \
+    psmisc \
+    pulseaudio \
+    pulseaudio-utils \
+    python3 \
+    python3-venv \
+    software-properties-common \
+    ssl-cert \
+    stterm \
+    sudo \
+    tar \
+    util-linux \
+    vulkan-tools \
+    wl-clipboard \
+    wtype \
+    x11-apps \
+    x11-common \
+    x11-utils \
+    x11-xkb-utils \
+    x11-xserver-utils \
+    xauth \
+    xclip \
+    xcvt \
+    xdg-utils \
+    xdotool \
+    xfconf \
+    xfonts-base \
+    xkb-data \
+    xsel \
+    xserver-common \
+    xserver-xorg-core \
+    xserver-xorg-video-amdgpu \
+    xserver-xorg-video-ati \
+    xserver-xorg-video-nouveau \
+    xsettingsd \
+    xterm \
+    xutils \
+    xvfb \
+    zlib1g \
+    zstd && \
+  echo "**** install selkies ****" && \
+  SELKIES_RELEASE=v1.6.2 && \
+  cd /tmp && \
+  tar xf selkies.tar.gz && \
+  cd selkies-* && \
+  sed -i '/cryptography/d' pyproject.toml && \
+  python3 \
+    -m venv \
+    --system-site-packages \
+    /lsiopy && \
+  pip install . && \
+  pip install setuptools && \
+  echo "**** install selkies interposer ****" && \
+  cd addons/js-interposer && \
+  gcc -shared -fPIC -ldl \
+    -o selkies_joystick_interposer.so \
+    joystick_interposer.c && \
+  mv \
+    selkies_joystick_interposer.so \
+    /usr/lib/selkies_joystick_interposer.so && \
+  echo "**** install selkies fake udev ****" && \
+  cd ../fake-udev && \
+  make && \
+  mkdir /opt/lib && \
+  mv \
+    libudev.so.1.0.0-fake \
+    /opt/lib/ && \
+  echo "**** add icon ****" && \
+  mkdir -p \
+    /usr/share/selkies/www && \
+  echo "**** openbox tweaks ****" && \
+  sed -i \
+    -e 's/NLIMC/NLMC/g' \
+    -e '/debian-menu/d' \
+    -e 's|</applications>|  <application class="*"><maximized>yes</maximized></application>\n</applications>|' \
+    -e 's|</keyboard>|  <keybind key="C-S-d"><action name="ToggleDecorations"/></keybind>\n</keyboard>|' \
+    -e 's|<number>4</number>|<number>1</number>|' \
+    /etc/xdg/openbox/rc.xml && \
+  sed -i \
+    's/--startup/--replace --startup/g' \
+    /usr/bin/openbox-session && \
+  echo "**** user perms ****" && \
+  sed -e 's/%sudo	ALL=(ALL:ALL) ALL/%sudo ALL=(ALL:ALL) NOPASSWD: ALL/g' \
+    -i /etc/sudoers && \
+  echo "abc:abc" | chpasswd && \
+  usermod -s /bin/bash abc && \
+  usermod -aG sudo abc && \
+  echo "**** proot-apps ****" && \
+  mkdir /proot-apps/ && \
+  PAPPS_RELEASE=0.3.1 && \
+  tar -xzf /tmp/proot-apps-x86_64.tar.gz -C /proot-apps/ && \
+  echo "${PAPPS_RELEASE}" > /proot-apps/pversion && \
+  echo "**** dind support ****" && \
+  useradd -U dockremap && \
+  usermod -G dockremap dockremap && \
+  echo 'dockremap:165536:65536' >> /etc/subuid && \
+  echo 'dockremap:165536:65536' >> /etc/subgid && \
+  chmod +x /usr/local/bin/dind && \
+  echo 'hosts: files dns' > /etc/nsswitch.conf && \
+  usermod -aG docker abc && \
+  echo "**** libva hack ****" && \
+  mkdir -p /tmp/libva && \ 
+  cd /tmp/libva && \
+  ar x libva.deb && \
+  tar xf data.tar.zst && \
+  rm -f \
+    /usr/lib/aarch64-linux-gnu/libva.so.2* && \
+  cp -a \
+    usr/lib/aarch64-linux-gnu/libva.so.2* \
+    /usr/lib/aarch64-linux-gnu/ && \
+  echo "**** locales ****" && \
+  localedef -i zh_CN -f UTF-8 zh_CN.UTF-8 && \
+  echo "**** theme ****" && \
+  tar xzvf /tmp/theme.tar.gz -C /usr/share/themes/Clearlooks/openbox-3/ && \
+  echo "**** cleanup ****" && \
+  apt-get purge -y --autoremove \
+    python3-dev && \
+  apt-get autoclean && \
+  rm -rf \
+    /config/.cache \
+    /config/.npm \
+    /var/lib/apt/lists/* \
+    /var/tmp/* \
+    /tmp/*
+
+# add local files
+COPY /assets/icon.png /usr/share/selkies/www/icon.png
+COPY /assets/favicon.ico /usr/share/selkies/www/favicon.ico
+COPY /assets/root /
+COPY /assets/buildout /usr/share/selkies
+COPY --from=xvfb / /
+
+# ports and volumes
+EXPOSE 3000 3001
+VOLUME /config`
+2.
+`# WeChat for Linux using Selkies baseimage
+# Final stage - ultra-minimal
+FROM ghcr.io/linuxserver/baseimage-selkies:ubuntunoble
+
+COPY /assets/wechat.deb /tmp/wechat.deb
+
+# Install ONLY essential runtime dependencies + WeChat in ONE layer (UNCHANGED)
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+        libxkbcommon-x11-0 libxcb1 libxcb-randr0 libxcb-render0 libxcb-shape0 \
+        libxcb-shm0 libxcb-sync1 libxcb-util1 libxcb-xfixes0 libxcb-xinerama0 \
+        libatk1.0-0 libatk-bridge2.0-0 libc6 libcairo2 libdbus-1-3 \
+        libfontconfig1 libgbm1 libgcc1 libgdk-pixbuf2.0-0 libglib2.0-0 \
+        libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
+        libstdc++6 libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+        libxi6 libxrandr2 libxrender1 libxss1 libxtst6 libatomic1 \
+        libx11-xcb1 stalonetray python3-xlib && \
+    dpkg -i /tmp/wechat.deb || apt-get install -f -y && \
+    apt-get purge -y --autoremove && \
+    apt-get autoclean && \
+    rm -rf /tmp/wechat.deb \
+        /root/.cache /root/.pip /root/.local \
+        /config/.cache /config/.npm \
+        /var/lib/apt/lists/* \
+        /var/tmp/* /tmp/* \
+        /var/log/* \
+        /usr/share/doc/* /usr/share/man/* \
+        /usr/share/locale/* !/usr/share/locale/zh_CN* \
+        /usr/share/glib-2.0/schemas/*.xml \
+        /usr/share/gtk-doc 2>/dev/null || true \
+        /usr/lib/python3*/test* /usr/lib/python3*/idlelib* /usr/lib/python3*/ensurepip* \
+        /usr/lib/python3.*/dist-packages/*test* && \
+    find /usr -name "*.pyc" -delete 2>/dev/null || true && \
+    find /usr -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/lib -name "*.a" -delete 2>/dev/null || true && \
+    sed -i '/<dock>/,/<\/dock>/s/<noStrut>no<\/noStrut>/<noStrut>yes<\/noStrut>/' /etc/xdg/openbox/rc.xml && \
+    cp /usr/share/icons/hicolor/128x128/apps/wechat.png /usr/share/selkies/www/icon.png && \
+    mkdir -p /var/log/nginx && chmod 755 /var/log/nginx
+
+# set app name
+ENV TITLE="WeChat-Selkies"
+ENV TZ="Asia/Shanghai"
+ENV LC_ALL="zh_CN.UTF-8"
+ENV AUTO_START_WECHAT="true"
+
+# add local files
+COPY /assets/root /`
